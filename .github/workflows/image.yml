@@ -1,6 +1,6 @@
-# Builds the bridge image on an x86 runner and pushes it to GHCR for Railway to deploy. MT5 is
-# installed by running MetaQuotes' official installer in a plain container (Railway's sandbox, and
-# possibly BuildKit's, trips its debugger check) and committing that container as the image.
+# Builds the bridge image (Wine, Windows Python, the MetaTrader5 package, the bridge) on an x86
+# runner and pushes it to GHCR for Railway. MT5's program files are not in it (MetaQuotes' installer
+# stops under Wine in containers; see install-python.sh): each bridge unpacks them from its volume.
 name: mt5-bridge image
 
 on:
@@ -26,19 +26,8 @@ jobs:
       - name: Build base (Wine, tools, bridge files)
         run: docker build --platform linux/amd64 -t bridge-base .
 
-      - name: Install Python, MetaTrader5 and MT5 in a container
-        run: docker run --name installer --entrypoint sh bridge-base /opt/bridge/install-mt5.sh
-
-      - name: Keep the failure screenshot
-        if: failure()
-        run: docker cp installer:/tmp/install-failed.png install-failed.png || true
-
-      - uses: actions/upload-artifact@v4
-        if: failure()
-        with:
-          name: install-failed
-          path: install-failed.png
-          if-no-files-found: ignore
+      - name: Install Python and the MetaTrader5 package in a container
+        run: docker run --name installer --entrypoint sh bridge-base /opt/bridge/install-python.sh
 
       - name: Commit the installed container as the image
         run: |
@@ -50,7 +39,10 @@ jobs:
 
       - name: Smoke test
         run: |
-          docker run -d --name bridge -e BRIDGE_TOKEN=ci -p 8000:8000 "${{ steps.image.outputs.name }}:${{ github.sha }}"
+          # No MT5 archive in CI, so stand in a fake terminal file: /health must answer either way.
+          docker run -d --name bridge -e BRIDGE_TOKEN=ci -p 8000:8000 \
+            --entrypoint sh "${{ steps.image.outputs.name }}:${{ github.sha }}" -c \
+            'mkdir -p "$WINEPREFIX/drive_c/Program Files/MetaTrader 5" && touch "$WINEPREFIX/drive_c/Program Files/MetaTrader 5/terminal64.exe" && exec /opt/bridge/entrypoint.sh'
           for i in $(seq 1 30); do
             curl -fsS http://127.0.0.1:8000/health && exit 0
             sleep 2
