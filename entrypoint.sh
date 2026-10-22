@@ -9,10 +9,13 @@ MT5_ARCHIVE="${MT5_ARCHIVE:-/data/mt5.tar.gz}"
 MT5DIR="$WINEPREFIX/drive_c/Program Files/MetaTrader 5"
 
 if [ ! -f "$MT5DIR/terminal64.exe" ]; then
-    [ -f "$MT5_ARCHIVE" ] || {
-        echo "no MT5 program files: upload a clean MT5 archive to $MT5_ARCHIVE" >&2
-        exit 1
-    }
+    # Wait rather than exit: a crash-looping container cannot receive the upload (Railway copies
+    # volume files through the running container).
+    until [ -f "$MT5_ARCHIVE" ]; do
+        echo "waiting for a clean MT5 archive at $MT5_ARCHIVE" >&2
+        sleep 30
+    done
+    sleep 5  # let an upload in progress finish writing
     mkdir -p "$MT5DIR"
     tar xzf "$MT5_ARCHIVE" -C "$MT5DIR"
 fi
