@@ -1,5 +1,6 @@
-# Builds the bridge image on an x86 runner, where MetaQuotes' official MT5 installer runs (Railway's
-# sandbox trips its debugger check), and pushes it to GHCR for Railway to deploy.
+# Builds the bridge image on an x86 runner and pushes it to GHCR for Railway to deploy. MT5 is
+# installed by running MetaQuotes' official installer in a plain container (Railway's sandbox, and
+# possibly BuildKit's, trips its debugger check) and committing that container as the image.
 name: mt5-bridge image
 
 on:
@@ -22,24 +23,30 @@ jobs:
         id: image
         run: echo "name=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/guardian-mt5-bridge" >> "$GITHUB_OUTPUT"
 
-      - uses: docker/setup-buildx-action@v3
+      - name: Build base (Wine, tools, bridge files)
+        run: docker build --platform linux/amd64 -t bridge-base .
 
-      - uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Install Python, MetaTrader5 and MT5 in a container
+        run: docker run --name installer --entrypoint sh bridge-base /opt/bridge/install-mt5.sh
 
-      - uses: docker/build-push-action@v6
+      - name: Keep the failure screenshot
+        if: failure()
+        run: docker cp installer:/tmp/install-failed.png install-failed.png || true
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
         with:
-          context: .
-          platforms: linux/amd64
-          push: true
-          tags: |
-            ${{ steps.image.outputs.name }}:latest
-            ${{ steps.image.outputs.name }}:${{ github.sha }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          name: install-failed
+          path: install-failed.png
+          if-no-files-found: ignore
+
+      - name: Commit the installed container as the image
+        run: |
+          docker commit \
+            --change 'ENTRYPOINT ["/opt/bridge/entrypoint.sh"]' \
+            --change 'CMD []' \
+            installer "${{ steps.image.outputs.name }}:${{ github.sha }}"
+          docker tag "${{ steps.image.outputs.name }}:${{ github.sha }}" "${{ steps.image.outputs.name }}:latest"
 
       - name: Smoke test
         run: |
@@ -50,3 +57,14 @@ jobs:
           done
           docker logs bridge
           exit 1
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push
+        run: |
+          docker push "${{ steps.image.outputs.name }}:${{ github.sha }}"
+          docker push "${{ steps.image.outputs.name }}:latest"

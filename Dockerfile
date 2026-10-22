@@ -1,6 +1,7 @@
-# One MT5 terminal plus the HTTP bridge, under Wine, with Python, the MetaTrader5 package and MT5
-# installed at build time from official sources (install-mt5.sh). Build on an x86 host (the GitHub
-# Actions workflow); the running container needs no volume and installs nothing.
+# One MT5 terminal plus the HTTP bridge, under Wine. This builds the base only: the CI workflow then
+# runs install-mt5.sh in a plain container on an x86 runner and commits it as the final image, so
+# the running container needs no volume and installs nothing. Built alone (docker compose), the
+# image has no MT5 yet: run install-mt5.sh in it once first.
 FROM --platform=linux/amd64 debian:bookworm-slim
 
 ENV DEBIAN_FRONTEND=noninteractive \
@@ -16,6 +17,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
 RUN dpkg --add-architecture i386 \
     && apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates curl gnupg unzip xvfb xdotool \
+        x11-apps netpbm \
     && mkdir -pm755 /etc/apt/keyrings \
     && curl -fsSL https://dl.winehq.org/wine-builds/winehq.key \
         | gpg --dearmor -o /etc/apt/keyrings/winehq-archive.key \
@@ -29,11 +31,8 @@ RUN dpkg --add-architecture i386 \
     # under Apple Silicon's 16K pages. Harmless on a real x86 host.
     && rm -rf /opt/wine-stable/lib/wine/i386-unix
 
-COPY install-mt5.sh /opt/bridge/
-RUN sh /opt/bridge/install-mt5.sh
-
-COPY bridge.py entrypoint.sh /opt/bridge/
-RUN chmod +x /opt/bridge/entrypoint.sh
+COPY install-mt5.sh bridge.py entrypoint.sh /opt/bridge/
+RUN chmod +x /opt/bridge/entrypoint.sh /opt/bridge/install-mt5.sh
 
 EXPOSE 8000
 ENTRYPOINT ["/opt/bridge/entrypoint.sh"]
