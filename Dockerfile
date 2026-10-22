@@ -13,6 +13,11 @@ ENV DEBIAN_FRONTEND=noninteractive \
     WINEDLLOVERRIDES="mscoree,mshtml=" \
     MT5_PATH="C:\\Program Files\\MetaTrader 5\\terminal64.exe"
 
+# Wine 9 rather than the current 11: under stock Wine 11 in a container, MT5's protected parts
+# refuse to cooperate (the installer and LiveUpdate report a debugger, and the terminal never
+# answers the MetaTrader5 package's IPC). Community MT5 images that work run older Wine.
+ARG WINE_VERSION=9.0.0.0~bookworm-1
+
 RUN dpkg --add-architecture i386 \
     && apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates curl gnupg unzip xvfb xdotool \
@@ -22,12 +27,10 @@ RUN dpkg --add-architecture i386 \
     && curl -fsSL -o /etc/apt/sources.list.d/winehq-bookworm.sources \
         https://dl.winehq.org/wine-builds/debian/dists/bookworm/winehq-bookworm.sources \
     && apt-get update \
-    && apt-get install -y --install-recommends winehq-stable \
-    && rm -rf /var/lib/apt/lists/* \
-    # Everything here is 64-bit (embeddable Python, MT5), so drop Wine's 32-bit Linux side: with
-    # it gone Wine never starts an i386 process, which Rosetta cannot run and QEMU crashes on
-    # under Apple Silicon's 16K pages. Harmless on a real x86 host.
-    && rm -rf /opt/wine-stable/lib/wine/i386-unix
+    && apt-get install -y --install-recommends \
+        "winehq-stable=$WINE_VERSION" "wine-stable=$WINE_VERSION" \
+        "wine-stable-amd64=$WINE_VERSION" "wine-stable-i386=$WINE_VERSION" \
+    && rm -rf /var/lib/apt/lists/*
 
 COPY install-python.sh bridge.py entrypoint.sh /opt/bridge/
 RUN chmod +x /opt/bridge/entrypoint.sh /opt/bridge/install-python.sh
